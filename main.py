@@ -3,93 +3,85 @@
 import cv2
 import numpy as np
 import glob
-"""
-# termination criteria
-criteria = (cv2.TERM_CRITERIA_EPS + cv2.TERM_CRITERIA_MAX_ITER, 30, 0.001)
 
-# prepare object points, like (0,0,0), (1,0,0), (2,0,0) ....,(6,5,0)
-objp = np.zeros((5*8,3), np.float32)
-objp[:,:2] = np.mgrid[0:8,0:5].T.reshape(-1,2)*30
+#known
+f_x = 1132.804#745.159
+f_y = 1132.785#745.743
+c_x = 710.39#485.509
+c_y = 510.06#377.439
+r = 0.95
+distance = 5
+flash_img = "10.jpg"
+light_img = "11.jpg"
+automatic = True
 
-# Arrays to store object points and image points from all the images.
-objpoints = [] # 3d point in real world space
-imgpoints = [] # 2d points in image plane.
-
-images = glob.glob('*.jpg')
-
-
-for fname in images:
-    img = cv2.imread(fname)
-    gray = cv2.cvtColor(img,cv2.COLOR_BGR2GRAY)
-    
-    # Find the chess board corners
-    ret, corners = cv2.findChessboardCorners(gray, (8,5),None)
-
-    # If found, add object points, image points (after refining them)
-    if ret == True:
-        objpoints.append(objp)
-
-        corners2 = cv2.cornerSubPix(gray,corners,(11,11),(-1,-1),criteria)
-        imgpoints.append(corners2)
-
-        # Draw and display the corners
-        img = cv2.drawChessboardCorners(img, (8,5), corners2,ret)
-        cv2.imshow('img',img)
-        cv2.waitKey(500)
-    else:
-        print('ff')
-
-cv2.destroyAllWindows()
-
-ret, mtx, dist, rvecs, tvecs = cv2.calibrateCamera(objpoints, imgpoints, gray.shape[::-1], None, None)
-
-img = cv2.imread('1.jpg')
-h,  w = img.shape[:2]
-newcameramtx, roi=cv2.getOptimalNewCameraMatrix(mtx,dist,(w,h),1,(w,h))
-#undistort
-dst = cv2.undistort(img, mtx, dist, None, newcameramtx)
-#crop the image
-#x,y,w,h = roi
-#dst = dst[y:y+h, x:x+w]
-cv2.imwrite('new1.jpg', dst)
-
-print(mtx)
-"""
 # show image..
-img = cv2.imread("1.jpg", cv2.IMREAD_COLOR)
+img = cv2.imread(flash_img, cv2.IMREAD_COLOR)
 height, width, channel = img.shape
 print(height, width , channel)
 
 flash_point = []
 
+def point_highlight(image):
+    #  constants
+    BINARY_THRESHOLD = 50
+    CONNECTIVITY = 2
+    DRAW_CIRCLE_RADIUS = 2
+
+    #  convert to gray
+    gray_image = cv2.cvtColor(image, cv2.COLOR_BGR2GRAY)
+
+    #  extract edges
+    binary_image = cv2.Laplacian(gray_image, cv2.CV_8UC1)
+
+    #  fill in the holes between edges with dilation
+    dilated_image = cv2.dilate(binary_image, np.ones((4, 4)))
+
+    #  threshold the black/ non-black areas
+    _, thresh = cv2.threshold(dilated_image, BINARY_THRESHOLD, 255, cv2.THRESH_BINARY)
+
+    #  find connected components
+    components = cv2.connectedComponentsWithStats(thresh, CONNECTIVITY, cv2.CV_32S)
+
+    #  draw circles around center of components
+    #see connectedComponentsWithStats function for attributes of components variable
+    centers = components[3]
+    centers = centers[centers[:, 1] > 600]
+    print(centers)
+    cv2.imshow("result", thresh)
+    cv2.waitKey(0)
+    #print(centers[centers[:,1]>600])
+    cv2.imwrite(light_img+"new.jpg", thresh)
+    return sorted(centers,key=lambda x: x[0]+x[1])
+
 # return pixel if Lmouseclick
 def findpixel(event, x, y, flags, param):
     if event == cv2.EVENT_LBUTTONUP:
         print(x, y)
-        flash_point.append((x,y))
-cv2.namedWindow('flash')
-cv2.setMouseCallback("flash", findpixel)
+        flash_point.append((x, y))
+if automatic:
+    flash_point = point_highlight(img)
+else:
+    cv2.namedWindow('flash')
+    cv2.setMouseCallback("flash", findpixel)
 
-cv2.imshow("flash", img)
-cv2.waitKey(0)
-cv2.destroyAllWindows()
+    cv2.imshow("flash", img)
+    cv2.waitKey(0)
+    cv2.destroyAllWindows()
 
+#
 print(flash_point)
 
-f_x = 1113.04#745.159
-f_y = 1114.05#745.743
-c_x = 727.69#485.509
-c_y = 566.13#377.439
 
 
 flash_point = np.array(flash_point)#[(492, 531), (510, 527), (526, 523), (543, 521), (558, 518)])
 camera_point = np.ones((5,3))
 
 camera_point[:, 0] = (flash_point[:, 0] - c_x) / f_x
-camera_point[:, 1] = (flash_point[:, 0] - c_y) / f_y
+camera_point[:, 1] = (flash_point[:, 1] - c_y) / f_y
 for i in range(len(camera_point)):
     camera_point[i,:] = camera_point[i,:] / np.linalg.norm(camera_point[i,:])
-
+print('camera_point:')
 print(camera_point)
 
 #least square method
@@ -115,7 +107,7 @@ for i in range(0, len(camera_point)):
 ans = np.dot(np.linalg.pinv(coeff),const)
 #print(ans)
 
-k = np.sqrt(7.5**2 / (1 + ans[3, 0]** 2 + ans[4, 0]** 2))
+k = np.sqrt(distance**2 / (1 + ans[3, 0]** 2 + ans[4, 0]** 2))
 print(k)
 print(ans * k)
 ans = ans*k
@@ -139,7 +131,7 @@ p0_z = ans[0, 0]
 ##########finding intersection with sphere#########
 
 #choose highlight point 
-img = cv2.imread("1.jpg", cv2.IMREAD_COLOR)
+img = cv2.imread(light_img, cv2.IMREAD_COLOR)
 height, width, channel = img.shape
 print(height, width , channel)
 
@@ -150,20 +142,24 @@ def findlightpixel(event, x, y, flags, param):
     if event == cv2.EVENT_LBUTTONUP:
         print(x, y)
         light_point.append((x,y))
-cv2.namedWindow('light')
-cv2.setMouseCallback("light", findlightpixel)
 
-cv2.imshow("light", img)
-cv2.waitKey(0)
-cv2.destroyAllWindows()
 
+if automatic:
+    light_point = point_highlight(img)
+else:
+    cv2.namedWindow('light')
+    cv2.setMouseCallback("light", findlightpixel)
+
+    cv2.imshow("light", img)
+    cv2.waitKey(0)
+    cv2.destroyAllWindows()
 print(light_point)
 
 light_point = np.array(light_point)#[(492, 531), (510, 527), (526, 523), (543, 521), (558, 518)])
 camera_lpoint = np.ones((5,3))
 
 camera_lpoint[:, 0] = (light_point[:, 0] - c_x) / f_x
-camera_lpoint[:, 1] = (light_point[:, 0] - c_y) / f_y
+camera_lpoint[:, 1] = (light_point[:, 1] - c_y) / f_y
 
 for i in range(len(camera_lpoint)):
     camera_lpoint[i,:] = camera_lpoint[i,:] / np.linalg.norm(camera_lpoint[i,:])
@@ -183,28 +179,32 @@ for i in range(len(camera_lpoint)):
     ball_iy = ball_pos[i, 1]
     ball_iz = ball_pos[i, 2]
     ball_i = np.array([ball_ix,ball_iy,ball_iz])
-    cons = [np.sum(f_i ** 2), -2 * (np.dot(f_i, ball_i)), np.sum(ball_i ** 2) - 1]
+    cons = [np.sum(f_i ** 2), -2 * (np.dot(f_i, ball_i)), np.sum(ball_i ** 2) -(r**2)]
     print(cons)
     t = np.roots(cons)
     print(t)
     #inter_point[i,:] = t[0] * camera_lpoint[i,:]
 
-    inter_point[i,:] = t[1] * camera_lpoint[i,:]
-
+    inter_point[i,:] = np.min(t) * camera_lpoint[i,:]
+print('inter_point:')
 print(inter_point)
 
 #find normal vector of intersection
 normal = inter_point - ball_pos
+print('normal:')
+print(normal)
 for i in range(len(normal)):
     normal[i,:] = normal[i,:] / np.linalg.norm(normal[i,:])
-
+print('normal:')
 print(normal)
 
 #find reflection vector
 reflect = np.zeros((5, 3))
 for i in range(len(reflect)):
-    reflect[i,:] = inter_point[i,:] - 2 * normal[i,:] * (np.sum(inter_point[i,:] * normal[i,:]))
+    reflect[i,:] = inter_point[i,:] - 2 * normal[i,:] * (np.dot(inter_point[i,:],normal[i,:]))
     print((inter_point[i,:] * normal[i,:]))
+
+print('reflect:')
 print(reflect)
 
 #least square method with intersection and reflection vector -> find light source position
