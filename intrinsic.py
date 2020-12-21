@@ -14,7 +14,7 @@ objp[:,:2] = np.mgrid[0:8,0:5].T.reshape(-1,2)*30
 objpoints = [] # 3d point in real world space
 imgpoints = [] # 2d points in image plane.
 
-images = glob.glob('calib/*.jpg')
+images = glob.glob('img/*.jpg')
 
 
 for fname in images:
@@ -36,20 +36,20 @@ for fname in images:
         cv2.imshow('img',img)
         cv2.waitKey(500)
     else:
-        print('ff')
+        print("can't find chessboard")
 
 cv2.destroyAllWindows()
 
 ret, mtx, dist, rvecs, tvecs = cv2.calibrateCamera(objpoints, imgpoints, gray.shape[::-1], None, None)
 
+print(mtx)
+
+"""
 img = cv2.imread('1.jpg')
 h,  w = img.shape[:2]
 newcameramtx, roi=cv2.getOptimalNewCameraMatrix(mtx,dist,(w,h),1,(w,h))
 #undistort
 dst = cv2.undistort(img, mtx, dist, None, newcameramtx)
-#crop the image
-#x,y,w,h = roi
-#dst = dst[y:y+h, x:x+w]
 cv2.imwrite('new1.jpg', dst)
+"""
 
-print(mtx)

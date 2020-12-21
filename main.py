@@ -4,38 +4,43 @@ import cv2
 import numpy as np
 import glob
 
-#known
+#known parameters
 f_x = 1132.804#745.159
 f_y = 1132.785#745.743
 c_x = 710.39#485.509
 c_y = 510.06#377.439
-r = 0.95
-distance = 5
-flash_img = "10.jpg"
-light_img = "11.jpg"
-automatic = True
+r = 1.5
+
+flash_img = "img/p2d30f.jpg"
+light_img = "img/p2d30l.jpg"
+
+distance = (int(flash_img[7])** 2 + int(flash_img[8])** 2)** 0.5 * 2.5
+
+#find light points with automatic way
+automatic = 1
 
 # show image..
 img = cv2.imread(flash_img, cv2.IMREAD_COLOR)
 height, width, channel = img.shape
-print(height, width , channel)
 
 flash_point = []
 
-def point_highlight(image):
+def point_highlight(image,f):
     #  constants
-    BINARY_THRESHOLD = 50
-    CONNECTIVITY = 2
-    DRAW_CIRCLE_RADIUS = 2
+    BINARY_THRESHOLD = 60
+    CONNECTIVITY = 10
+    DRAW_CIRCLE_RADIUS = 4
 
-    #  convert to gray
-    gray_image = cv2.cvtColor(image, cv2.COLOR_BGR2GRAY)
-
+    # convert to gray
+    """
+    kernel = np.ones((2, 2), np.uint8)
+    result = cv2.morphologyEx(image, cv2.MORPH_OPEN, kernel)
+    gray_image = cv2.cvtColor(result, cv2.COLOR_BGR2GRAY)
     #  extract edges
-    binary_image = cv2.Laplacian(gray_image, cv2.CV_8UC1)
-
+    binary_image = cv2.Laplacian(gray_image, cv2.CV_8U)#,ksize=1)#C1)
+    #binary_image = cv2.Canny(gray_image,1080,1440)
     #  fill in the holes between edges with dilation
-    dilated_image = cv2.dilate(binary_image, np.ones((4, 4)))
+    dilated_image = cv2.dilate(binary_image, np.ones((6, 6)))
 
     #  threshold the black/ non-black areas
     _, thresh = cv2.threshold(dilated_image, BINARY_THRESHOLD, 255, cv2.THRESH_BINARY)
@@ -48,19 +53,47 @@ def point_highlight(image):
     centers = components[3]
     centers = centers[centers[:, 1] > 600]
     print(centers)
+    
     cv2.imshow("result", thresh)
     cv2.waitKey(0)
     #print(centers[centers[:,1]>600])
     cv2.imwrite(light_img+"new.jpg", thresh)
     return sorted(centers,key=lambda x: x[0]+x[1])
+    """
+    image = cv2.cvtColor(image, cv2.COLOR_BGR2GRAY)
+    if f: # flashlight
+        _, src_bin = cv2.threshold(image, 0, 255, cv2.THRESH_OTSU)  #|cv2.THRESH_OTSU)#)
+    else: # light source
+        _, src_bin = cv2.threshold(image, 70, 255,cv2.THRESH_BINARY)
+    cnt, labels, stats, centroids = cv2.connectedComponentsWithStats(src_bin)
 
-# return pixel if Lmouseclick
+    dst = cv2.cvtColor(image, cv2.COLOR_GRAY2BGR)
+
+    points = []
+
+    for i in range(1, cnt): 
+        (x, y, w, h, area) = stats[i]
+
+        # remove noise
+        if area < 5:
+            continue
+        else:
+            if f:
+                points.append([x + w / 2, y + h/2 ])
+            else:
+                points.append([x + w/2, y + h/2])
+            cv2.rectangle(dst, (x, y, w, h), (0, 255, 255))
+    cv2.imshow('dst', dst)
+    cv2.waitKey()
+    return sorted(points,key=lambda x: x[0]-x[1])
+    
+
+# return pixel if Lmouseclick 
 def findpixel(event, x, y, flags, param):
     if event == cv2.EVENT_LBUTTONUP:
-        print(x, y)
         flash_point.append((x, y))
 if automatic:
-    flash_point = point_highlight(img)
+    flash_point = point_highlight(img,1)
 else:
     cv2.namedWindow('flash')
     cv2.setMouseCallback("flash", findpixel)
@@ -69,10 +102,7 @@ else:
     cv2.waitKey(0)
     cv2.destroyAllWindows()
 
-#
-print(flash_point)
-
-
+# find the position of spheres
 
 flash_point = np.array(flash_point)#[(492, 531), (510, 527), (526, 523), (543, 521), (558, 518)])
 camera_point = np.ones((5,3))
@@ -81,8 +111,6 @@ camera_point[:, 0] = (flash_point[:, 0] - c_x) / f_x
 camera_point[:, 1] = (flash_point[:, 1] - c_y) / f_y
 for i in range(len(camera_point)):
     camera_point[i,:] = camera_point[i,:] / np.linalg.norm(camera_point[i,:])
-print('camera_point:')
-print(camera_point)
 
 #least square method
 #coeff = coeff of [p_x,p_y,p_z,d_y,d_z]
@@ -101,15 +129,9 @@ for i in range(0, len(camera_point)):
     const[i*3 + 2,:] = np.array([i * f_iy])
     
 
-#print(coeff)
-#print(const)
-
 ans = np.dot(np.linalg.pinv(coeff),const)
-#print(ans)
 
 k = np.sqrt(distance**2 / (1 + ans[3, 0]** 2 + ans[4, 0]** 2))
-print(k)
-print(ans * k)
 ans = ans*k
 
 ball_pos = np.zeros((5,3))
@@ -118,22 +140,15 @@ p0 = np.array([ans[0,0],ans[1,0],ans[2,0]])
 
 for i in range(5):
     ball_pos[i,:] = p0 + i * d
-    
-print('ball_pos :')
-print(ball_pos)
-print('d :')
-print(d)
 
 p0_y = ans[0, 0]
 p0_z = ans[0, 0]
-
 
 ##########finding intersection with sphere#########
 
 #choose highlight point 
 img = cv2.imread(light_img, cv2.IMREAD_COLOR)
 height, width, channel = img.shape
-print(height, width , channel)
 
 light_point = []
 
@@ -145,7 +160,7 @@ def findlightpixel(event, x, y, flags, param):
 
 
 if automatic:
-    light_point = point_highlight(img)
+    light_point = point_highlight(img,0)
 else:
     cv2.namedWindow('light')
     cv2.setMouseCallback("light", findlightpixel)
@@ -153,7 +168,6 @@ else:
     cv2.imshow("light", img)
     cv2.waitKey(0)
     cv2.destroyAllWindows()
-print(light_point)
 
 light_point = np.array(light_point)#[(492, 531), (510, 527), (526, 523), (543, 521), (558, 518)])
 camera_lpoint = np.ones((5,3))
@@ -164,10 +178,7 @@ camera_lpoint[:, 1] = (light_point[:, 1] - c_y) / f_y
 for i in range(len(camera_lpoint)):
     camera_lpoint[i,:] = camera_lpoint[i,:] / np.linalg.norm(camera_lpoint[i,:])
 
-print('light pos :')
-print(camera_lpoint)
 #find intersection with sphere (use np roots)
-
 inter_point = np.zeros((5,3))
 
 for i in range(len(camera_lpoint)):
@@ -180,39 +191,25 @@ for i in range(len(camera_lpoint)):
     ball_iz = ball_pos[i, 2]
     ball_i = np.array([ball_ix,ball_iy,ball_iz])
     cons = [np.sum(f_i ** 2), -2 * (np.dot(f_i, ball_i)), np.sum(ball_i ** 2) -(r**2)]
-    print(cons)
     t = np.roots(cons)
-    print(t)
-    #inter_point[i,:] = t[0] * camera_lpoint[i,:]
 
     inter_point[i,:] = np.min(t) * camera_lpoint[i,:]
-print('inter_point:')
-print(inter_point)
 
 #find normal vector of intersection
 normal = inter_point - ball_pos
-print('normal:')
-print(normal)
 for i in range(len(normal)):
     normal[i,:] = normal[i,:] / np.linalg.norm(normal[i,:])
-print('normal:')
-print(normal)
 
 #find reflection vector
 reflect = np.zeros((5, 3))
 for i in range(len(reflect)):
     reflect[i,:] = inter_point[i,:] - 2 * normal[i,:] * (np.dot(inter_point[i,:],normal[i,:]))
-    print((inter_point[i,:] * normal[i,:]))
-
-print('reflect:')
-print(reflect)
 
 #least square method with intersection and reflection vector -> find light source position
 #light coeff = (l_x, l_y, l_z, t_1, t_2, ... t_5) light: (l_x,l_y,l_z) param: t_i
 light_coeff = np.zeros((15, 8))
 light_const = inter_point.flatten()
 for i in range(5):
-    #light_coeff[i*3] = np.array([1,0,0,reflect[i,0],0,0,0,0])
     light_coeff[i * 3, 0] = 1
     light_coeff[i * 3, i + 3] = - reflect[i, 0]
     light_coeff[i * 3 + 1, 1] = 1
@@ -220,12 +217,24 @@ for i in range(5):
     light_coeff[i * 3 + 2, 2] = 1
     light_coeff[i * 3 + 2, i + 3] = -reflect[i, 2]
 
-print('light_coeff :')
-print(light_coeff)
-print('light_const :')
-print(light_const)
-
 light_pos = np.dot(np.linalg.pinv(light_coeff), light_const)
-print('light_pos :')
-print(light_pos)
-    
+
+print("condition: ")
+print(flash_img, flash_img[:6])
+
+print("ball loss:")
+if (flash_img[:6] == 'img/p1'):
+    bp = ball_pos[0,:] - np.array([0, 17.5, 50])
+    print('({0:0.2f}, {1:0.2f}, {2:0.2f})'.format(bp[0], bp[1], bp[2]))
+    bl = np.sum((ball_pos[0,:]-np.array([0,17.5,50]))**2)**0.5
+    print(bl)
+else:
+    bp = ball_pos[0,:] - np.array([0, 17.5, 60])
+    print('({0:0.2f}, {1:0.2f}, {2:0.2f})'.format(bp[0], bp[1], bp[2]))
+    bl = np.sum((ball_pos[0,:]-np.array([0,17.5,60]))**2)**0.5
+    print(bl)
+
+print("light loss:")
+lp = light_pos[:3] - np.array([50, -31.5, 50])
+print('({0:0.2f}, {1:0.2f}, {2:0.2f})'.format(lp[0], lp[1], lp[2]))
+print(np.sum((light_pos[:3]-np.array([50, -31.5, 50]))**2)**0.5)
